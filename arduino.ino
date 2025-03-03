@@ -162,26 +162,36 @@ void sendATCommand(String command, String expectedResponse, unsigned long timeou
 
 void senddata() {
   String topic = "/PGN/SmartMeter";
-  // Buat string JSON
-  String jsonData = createJson(batteryPercentage, valveState, counterValue);
-  // Hitung jumlah karakter dalam string JSON
+  
+  int signalStrength;
+  String signalLevel;
+
+  readSignalStrength(signalStrength, signalLevel); // Baca kekuatan sinyal
+
+  // Buat string JSON dengan data tambahan
+  String jsonData = createJson(batteryPercentage, valveState, counterValue, signalStrength, signalLevel);
+
   int jsonLength = jsonData.length();
 
   sendATCommand("AT+SMPUB=\"" + topic + "\",\"" + String(jsonLength) + "\",0,0", ">", 2000);
   sim7000.println(jsonData);
 }
 
-String createJson(int batteryPercentage, String valveState, float counterValue) {
+
+String createJson(int batteryPercentage, String valveState, float counterValue, int signalStrength, String signalLevel) {
   String jsonString = "{\n";
   jsonString += "  \"condition_io\": \"" + valveState + "\",\n";
   jsonString += "  \"volume\": \"" + String(counterValue, 3) + "\",\n";
   jsonString += "  \"type_io\": \"remote\",\n";
   jsonString += "  \"battery\": \"" + String(batteryPercentage) + "\",\n";
+  jsonString += "  \"signal_strength\": \"" + String(signalStrength) + " dBm\",\n";
+  jsonString += "  \"signal_level\": \"" + signalLevel + "\",\n";
   jsonString += "  \"metergas_id\": \"2\"\n";
   jsonString += "}";
 
   return jsonString;
 }
+
 
 void readsensor() {
   // Read the state of the sensors
@@ -257,5 +267,45 @@ int calculateBatteryPercentage(float voltage) {
   } else {
     // Persentase dihitung secara linier antara minVoltage dan maxVoltage
     return (int)((voltage - minVoltage) / (maxVoltage - minVoltage) * 100);
+  }
+}
+
+void readSignalStrength(int &signalStrength, String &signalLevel) {
+  sim7000.println("AT+CSQ");  // Kirim perintah untuk membaca sinyal
+  delay(100);  
+
+  while (sim7000.available()) {
+    String response = sim7000.readString(); // Baca respon dari SIM7000
+    Serial.println("CSQ Response: " + response);
+
+    int csqIndex = response.indexOf("+CSQ: ");
+    if (csqIndex != -1) {
+      int commaIndex = response.indexOf(",", csqIndex);
+      if (commaIndex != -1) {
+        String rssiStr = response.substring(csqIndex + 6, commaIndex);
+        int rssi = rssiStr.toInt(); // Konversi RSSI ke integer
+
+        // Konversi RSSI ke dBm berdasarkan tabel nilai CSQ ke dBm
+        if (rssi == 99) {  
+          signalStrength = -999;  // Tidak ada sinyal
+          signalLevel = "Unknown";
+        } else {
+          signalStrength = (2 * rssi) - 113;  // Konversi ke dBm
+          
+          // Tentukan kualitas sinyal berdasarkan nilai dBm
+          if (signalStrength >= -53) {
+            signalLevel = "Excellent";
+          } else if (signalStrength >= -65) {
+            signalLevel = "Good";
+          } else if (signalStrength >= -75) {
+            signalLevel = "Fair";
+          } else if (signalStrength >= -85) {
+            signalLevel = "Weak";
+          } else {
+            signalLevel = "Marginal";
+          }
+        }
+      }
+    }
   }
 }
